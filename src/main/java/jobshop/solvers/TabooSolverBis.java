@@ -1,16 +1,34 @@
 package jobshop.solvers;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import jobshop.Instance;
 import jobshop.Result;
 import jobshop.Solver;
 import jobshop.encodings.ResourceOrder;
 import jobshop.encodings.Task;
 
-import java.util.ArrayList;
-import java.util.List;
+public class TabooSolverBis implements Solver {
 
-public class DescentSolver implements Solver {
-
+	static class Element {
+		final ResourceOrder r;
+		final int makespan;
+		final Swap s;
+		public Element(ResourceOrder res, Swap sw)
+		{
+			this.r = res;
+			this.makespan = this.r.toSchedule().makespan();
+			this.s = sw;
+		}
+		
+		public Element(ResourceOrder res, int mk, Swap sw)
+		{
+			this.r = res;
+			this.makespan = mk;
+			this.s = sw;
+		}
+	}
 	/** A block represents a subsequence of the critical path such that all tasks in it execute on the same machine.
 	 * This class identifies a block in a ResourceOrder representation.
 	 *
@@ -66,7 +84,7 @@ public class DescentSolver implements Solver {
 			this.t1 = t1;
 			this.t2 = t2;
 		}
-		
+
 		/** Apply this swap on the given resource order, transforming it into a new solution. */
 		public void applyOn(ResourceOrder order) {
 			ResourceOrder r_O_temp = order.copy();
@@ -75,44 +93,86 @@ public class DescentSolver implements Solver {
 		}
 	}
 	
-	@Override
-    public Result solve(Instance instance, long deadline) {
-        GreedySolverEST_LRPT glouton = new GreedySolverEST_LRPT();
-        // initialisation
-        Result sinit = glouton.solve(instance,deadline);
-        int setoile = sinit.schedule.makespan();
-        boolean amelioration = true;
-        ResourceOrder r = new ResourceOrder(sinit.schedule);
-        
-        while(amelioration && (deadline - System.currentTimeMillis() > 1)){
-            List<Block> blocks = blocksOfCriticalPath(r);
-            ResourceOrder voisin = null;
-            ResourceOrder meilleurVoisin = r;
-            for (Block block : blocks ) {
-                List<Swap> swaps = neighboors(block);
-                for (Swap swap : swaps ) {
-                    voisin=r.copy();
-                    swap.applyOn(voisin);
-                    if(meilleurVoisin.toSchedule().makespan() > voisin.toSchedule().makespan()){
-                        meilleurVoisin=voisin.copy();
-                    }
-                }
-            }
-            if(meilleurVoisin.toSchedule().makespan() < setoile) {
-                setoile=meilleurVoisin.toSchedule().makespan();
-                r = meilleurVoisin;
-                amelioration=true;
-            }
-            else {
-                amelioration=false;
-            }
-        }
-        return new Result(instance, r.toSchedule(), Result.ExitCause.Blocked);
-    }
+	
+	public int[][] sTabou;
+	private final int maxIter = 100;
+	private final int dureeTabou = 10;
 
+
+	@Override
+	public Result solve(Instance instance, long deadline) {
+		sTabou = new int[instance.numJobs * instance.numMachines][instance.numJobs * instance.numMachines];
+		//Arrays.fill(sTabou, 0);
+		GreedySolverEST_LRPT solver = new GreedySolverEST_LRPT();
+		Result s_init = solver.solve(instance, deadline);
+		ResourceOrder r_star = new ResourceOrder(s_init.schedule);
+		int makespan_star = r_star.toSchedule().makespan();
+		ResourceOrder r_courant = r_star.copy();
+		int k = 0;
+		
+		while(k <= maxIter && deadline - System.currentTimeMillis() > 1)
+		{
+			k++;
+			List<Block> blocks = blocksOfCriticalPath(r_courant);
+			//Meilleur voisin 
+			Element best_voisin = null;
+			for (Block block : blocks) {
+				List<Swap> swaps = neighboors(block);
+				for (Swap s : swaps){
+					ResourceOrder new_r = r_courant.copy();
+					s.applyOn(new_r);
+					int t1 = (s.machine * instance.numJobs) + s.t1;
+	                int t2 = (s.machine * instance.numJobs) + s.t2;
+	                int mk = new_r.toSchedule().makespan();
+	                if(best_voisin == null)
+	                {
+	                	if(this.sTabou[t1][t2] < k)
+	                	{
+	                		best_voisin = new Element(new_r, s);
+	                	}
+	                	else if(this.sTabou[t1][t2] > k && mk < makespan_star)
+	                	{
+	                		best_voisin = new Element(new_r, s);
+	                	}
+	                }
+	                else if(best_voisin != null)
+					{
+	                	if(mk < best_voisin.makespan && this.sTabou[t1][t2] < k)
+	                	{
+	                		best_voisin = new Element(new_r, mk, s);
+	                	}
+	                	else if(this.sTabou[t1][t2] > k && mk < makespan_star)
+	                	{
+	                		best_voisin = new Element(new_r, s);
+	                	}
+					}
+				}       
+			}
+			
+			//Ajout du meilleur voisin
+			if(best_voisin != null)
+			{
+				int t1 = (best_voisin.s.machine * instance.numJobs) + best_voisin.s.t1;
+	            int t2 = (best_voisin.s.machine * instance.numJobs) + best_voisin.s.t2;
+	            //System.out.println(" t1 : "+t1+ " t2 : "+t2);
+				this.sTabou[t1][t2] = k + dureeTabou;
+				//Affectation r_courant
+				r_courant = best_voisin.r.copy();
+				
+				//Affectation r_star;
+				if(best_voisin.makespan <= makespan_star)
+				{
+					r_star = best_voisin.r.copy();
+					makespan_star = best_voisin.makespan;
+				}
+			}	
+		}
+		return new Result(instance, r_star.toSchedule(), Result.ExitCause.Blocked);
+	}
+	
 	/** Returns a list of all blocks of the critical path. */
 	List<Block> blocksOfCriticalPath(ResourceOrder order) {
-		ArrayList<Block> blocks = new ArrayList<DescentSolver.Block>();
+		ArrayList<Block> blocks = new ArrayList<Block>();
 		List<Task> critPath = order.toSchedule().criticalPath();
 		Task startTask = null;
 		if(!critPath.isEmpty())
@@ -139,7 +199,7 @@ public class DescentSolver implements Solver {
 						}
 					}
 					int lastTask = FindIndexOnResource(order,order.instance.machine(tempTask.job,tempTask.task),tempTask);
-					if(lastTask>firstTask)
+					if(lastTask > firstTask)
 						blocks.add(new Block(order.instance.machine(tempTask.job,tempTask.task),firstTask,lastTask));
 				}
 				if(index<critPath.size()-1)
@@ -157,11 +217,12 @@ public class DescentSolver implements Solver {
 			index++;
 		}
 		return -1;
+		
 	}
 
 	/** For a given block, return the possible swaps for the Nowicki and Smutnicki neighborhood */
 	List<Swap> neighboors(Block block) {
-		ArrayList<Swap> swaps = new ArrayList<DescentSolver.Swap>();
+		ArrayList<Swap> swaps = new ArrayList<Swap>();
 		int size = block.lastTask - block.firstTask;
 		if(size == 1)
 		{
@@ -174,4 +235,5 @@ public class DescentSolver implements Solver {
 		}
 		return swaps;
 	}
+
 }

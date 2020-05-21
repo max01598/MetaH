@@ -1,10 +1,13 @@
 package jobshop;
 
 
-import jobshop.encodings.Task;
-
-import java.util.*;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Optional;
 import java.util.stream.IntStream;
+import jobshop.encodings.Task;
 
 public class Schedule {
     public final Instance pb;
@@ -63,10 +66,39 @@ public class Schedule {
         return max;
     }
 
+    public Schedule copy() {
+        return new Schedule(this.pb, this.times);
+    }
+    
+    public String toString()
+    {
+    	String s = "\n";
+    	int nbC = this.times.length;
+    	int nbL = this.times[0].length;
+    	s += "num colonne ";
+    	for(int j=0;j<nbL;j++)
+		{
+			s +=  " | " + j;
+		}
+    	s += "\n";
+    	for(int i= 0; i < nbC;i++)
+    	{
+    		s += "Job " + i + "       "; 
+    		for(int j=0;j<nbL;j++)
+    		{
+    			s += " | " +startTime(i,j);
+    		}
+    		s += "\n";
+    		
+    	}
+    	return s;
+    }
+
+
     public int startTime(Task task) {
         return startTime(task.job, task.task);
     }
-
+    
     public int endTime(Task task) {
         return startTime(task) + pb.duration(task.job, task.task);
     }
@@ -84,7 +116,7 @@ public class Schedule {
         }
         return true;
     }
-
+    
     public List<Task> criticalPath() {
         // select task with greatest end time
         Task ldd = IntStream.range(0, pb.numJobs)
